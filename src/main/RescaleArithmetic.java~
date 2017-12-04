@@ -1,0 +1,326 @@
+package main;
+
+import static java.lang.Math.pow;
+import java.util.HashMap;
+import java.util.LinkedList;
+/**
+ *
+ * @author 150009974
+ */
+public class RescaleArithmetic {
+    public static final boolean DO_LOG = false;
+    
+    private static final class Interval {
+        
+        long start, size, end;  // end = start + size, not very common.
+        char associatedSymbol;
+
+        public Interval(long start, long end) {
+            this.start = start;
+            this.end = end;
+            this.size = end - start +1;
+        }
+
+        public long getStart() {
+            return this.start;
+        }
+
+        public long getEnd() {
+            return this.end;
+        }
+        
+        public boolean contains(long value) {
+            return this.start <= value && value < this.end;
+        }
+        
+        private Interval setAssociatedSymbol(char c) {
+            this.associatedSymbol = c;
+            return this;
+        }
+        public char getAssociatedSymbol() {
+            return associatedSymbol;
+        }
+        
+        public String toHTML() {
+            return "[" + start + ":" + end + "]";
+        }
+        
+        @Override
+        public String toString() {
+            return "start = " + start + "\tend=" + end;
+        }
+        
+        public String toBinaryString() {
+            String s = "start = ";
+            
+            String bin = Long.toBinaryString(start);
+            for (int i = BITS_TO_LOOK_AT - bin.length(); i > 0; i --) 
+                s += "0";
+            s += bin;
+            
+            s += "\tend   = ";
+            
+            bin = Long.toBinaryString(end);
+            for (int i = BITS_TO_LOOK_AT - bin.length(); i > 0; i --)
+                s += "0";
+            s += bin;
+            
+            return s+"\n"+toString() + "\n";
+        }
+        
+        public Interval encodeSub(LinkedList<InformationSourceEntry> sourceList, char c) {
+            if(DO_LOG) System.out.println("Encode sub:");
+            double probabilitySum = 0;
+            double probabilitySumWithCurrent = 0;
+            
+            for (InformationSourceEntry entry : sourceList) {
+                if (entry.getSymbol() == c) {
+                    probabilitySumWithCurrent = probabilitySum + entry.getProbability();
+                    break;
+                }
+                probabilitySum += entry.getProbability();
+            
+            }
+            if(DO_LOG) System.out.println(probabilitySum+" " +probabilitySumWithCurrent);
+            long lower = (long)(this.start + this.size*probabilitySum);
+            long upper = (long)(this.start + this.size*probabilitySumWithCurrent -1);
+            
+            Interval i = new Interval(lower, upper);
+            if(DO_LOG) System.out.println(i.toBinaryString());
+            return i;
+        }
+        
+        public Interval decodeSub(LinkedList<InformationSourceEntry> sourceList, long value) {
+            if(DO_LOG) System.out.println("Decode sub:");
+            double probabilitySum = 0;
+            double probabilitySumWithCurrent = 0;
+            
+            for (InformationSourceEntry entry : sourceList) {
+                probabilitySumWithCurrent += entry.getProbability();
+                if(DO_LOG) System.out.println(probabilitySum+" " +probabilitySumWithCurrent);
+                long lower = (long)(this.start + this.size*probabilitySum);
+                long upper = (long)(this.start + this.size*probabilitySumWithCurrent -1);
+                Interval i = new Interval(lower, upper);
+                if (i.contains(value)) {
+                    if(DO_LOG) System.out.println(i.toBinaryString());
+                    i.setAssociatedSymbol(entry.getSymbol());
+                    return i;
+                }
+                probabilitySum += entry.getProbability();
+            }
+            return null;
+        }
+    
+    }
+    
+    public static final int BITS_TO_LOOK_AT = Long.SIZE -1;
+    
+    private InformationSource source;
+    private LinkedList<InformationSourceEntry> sourceLL;
+    private HashMap<Character, Interval> charToInterval = new HashMap<>();
+    
+    private String tag = "";  // For both encoding and decoding.
+    private long rescaleCounter = 0;  // For encoding.
+    private int nextBitOfTag = 0;  // For decoding.
+    private long value;  // For decoding.
+
+    public RescaleArithmetic(InformationSource source) {
+        this.source = source;
+        this.sourceLL = source.toLinkedList();
+    }
+    
+    public char getBit(long number, int i) {
+        return (char) ('0' + (number >> (BITS_TO_LOOK_AT -i))%2);
+    }
+    
+    private char notBit(char b) {
+        return b == '0' ? '1' : '0';
+    }
+    
+    private long getLastBits(long number) {
+        long endWithZeros = (-1); 
+        for (int i = 0; i < BITS_TO_LOOK_AT; i++)
+            endWithZeros <<= 1;// 11...100...0
+        long endWithOnes = endWithZeros ^ (-1);  // 00...011...1
+        return number&endWithOnes;
+    }
+    
+    private long getFirstBits(long number) {
+        long endWithZeros = (-1);
+        // Java does not like shifting by more than 30.
+        for (int i = Long.SIZE - BITS_TO_LOOK_AT -1; i > 0; i --)
+            endWithZeros <<= 1;
+        return number&endWithZeros;
+    }
+    
+    private Interval encodeRescale(Interval in) {
+        long lower = in.getStart();
+        long upper = in.getEnd();
+        while (true) {
+            // Rescale A:
+            char MSB = getBit(lower, 1);
+            char notMSB = notBit(MSB);
+            if (MSB == getBit(upper, 1)) {
+                if(DO_LOG) System.out.println("Rescale A");
+                tag += MSB;
+                for (; rescaleCounter > 0; rescaleCounter --) tag += notMSB;
+                if(DO_LOG) System.out.println("tag = " + tag);
+                
+                lower = getLastBits(lower<<1);
+                upper = getLastBits(upper<<1);
+                upper |= 1;
+                
+                if(DO_LOG) System.out.println(new Interval(lower, upper).toBinaryString());
+                
+            }
+            
+            // Rescale B:
+            else if (getBit(lower, 2) == '1' && getBit(upper, 2) == '0') {
+                if(DO_LOG) System.out.println("Rescale B");
+                
+                lower = getLastBits(lower<<1);
+                upper = getLastBits(upper<<1);
+                upper |= 1;
+                
+                // Flip MSB
+                lower ^= (long)pow(2,BITS_TO_LOOK_AT-1);
+                upper ^= (long)pow(2,BITS_TO_LOOK_AT-1);
+                
+                rescaleCounter ++;
+                
+                if(DO_LOG) System.out.println(new Interval(lower, upper).toBinaryString());
+            }
+            
+            else return new Interval(lower, upper);
+        }
+    }
+    
+    private void finishEncoding(long lower) {
+        char MSB = getBit(lower, 1);
+        char notMSB = notBit(MSB);
+        if(DO_LOG) System.out.println("tag = " + tag);
+        tag += MSB;
+        for (; rescaleCounter > 0; rescaleCounter --) tag += notMSB;
+        if(DO_LOG) System.out.println("tag = " + tag);
+        
+        long B_1 = BITS_TO_LOOK_AT-1;
+        long ones = (long)pow(2,B_1)-1;
+        String lastBits = Long.toBinaryString(lower&ones);
+        if(DO_LOG) System.out.println("last bits = " + lastBits + "  " + lastBits.length());
+        for (int i = BITS_TO_LOOK_AT-1 - lastBits.length(); i > 0; i --) 
+            tag += "0";
+        tag += lastBits;
+    }
+    
+    public String encode(String text) {
+        Interval current = new Interval(0, (long)pow(2,BITS_TO_LOOK_AT)-1);
+        tag = "";
+        char c;
+        for (int i = 0; i < text.length(); i++) {
+            c = text.charAt(i);
+            if(Character.isWhitespace(c)) continue;
+            if(DO_LOG) System.out.println(c);
+            current = encodeRescale(current.encodeSub(sourceLL, c));
+        }
+        finishEncoding(current.getStart());
+        return tag;
+    }
+    
+    private long binaryStringToLong(String binary) {
+        long rebuilt = 0;
+        if(DO_LOG) System.out.println(binary.length());
+        for (int i = 0; i < binary.length(); i++)
+            rebuilt = rebuilt*2 + (binary.charAt(i) - '0');
+        return rebuilt;
+    }
+    
+    private Interval decodeRescale(Interval in) {
+        long lower = in.getStart();
+        long upper = in.getEnd();
+        while (true) {
+            // Rescale A:
+            char MSB = getBit(lower, 1);
+            char notMSB = notBit(MSB);
+            if (MSB == getBit(upper, 1)) {
+                if(DO_LOG) System.out.println("Rescale A");
+                
+                lower = getLastBits(lower<<1);
+                upper = getLastBits(upper<<1);
+                upper |= 1;
+                
+                value = getLastBits(value<<1);
+                value |= (tag.charAt(nextBitOfTag++) - '0');
+                if(DO_LOG) System.out.println("value = " + value + "  " + Long.toBinaryString(value));
+                if(DO_LOG) System.out.println(new Interval(lower, upper).toBinaryString());
+                
+            }
+            
+            // Rescale B:
+            else if (getBit(lower, 2) == '1' && getBit(upper, 2) == '0') {
+                if(DO_LOG) System.out.println("Rescale B");
+                
+                lower = getLastBits(lower<<1);
+                upper = getLastBits(upper<<1);
+                upper |= 1;
+                value = getLastBits(value<<1);
+                value |= (tag.charAt(nextBitOfTag++) - '0');
+                
+                // Flip MSB
+                lower ^= (long)pow(2,BITS_TO_LOOK_AT-1);
+                upper ^= (long)pow(2,BITS_TO_LOOK_AT-1);
+                value ^= (long)pow(2,BITS_TO_LOOK_AT-1);
+                
+                rescaleCounter ++;
+                if(DO_LOG) System.out.println("value = " + value + "  " + Long.toBinaryString(value));
+                if(DO_LOG) System.out.println(new Interval(lower, upper).toBinaryString());
+            }
+            
+            else return new Interval(lower, upper);
+        }
+    }
+    
+    public String decode(String text, char eod) {
+        
+        long lower = 0, upper = (long)pow(2, BITS_TO_LOOK_AT) -1;
+        value = binaryStringToLong(text.substring(0, BITS_TO_LOOK_AT));
+        tag = text;
+        nextBitOfTag = BITS_TO_LOOK_AT;
+        String output = "";
+        Interval current = new Interval(lower, upper);
+        
+        while (true) {
+            if(DO_LOG) System.out.println("value = " + value + "  " + Long.toBinaryString(value));
+            current = current.decodeSub(sourceLL, value);
+            char symbol = current.getAssociatedSymbol();
+            if(DO_LOG) System.out.println("SYMBOL = " + symbol);
+            output += symbol;
+            if(symbol == eod) break;
+            current = decodeRescale(current);
+            if(DO_LOG) System.out.println("next bit of tag = " + nextBitOfTag);
+        }
+        
+        return output;
+        
+    }
+    
+    public static void main(String[] args) throws Exception {
+        InformationSource is = new InformationSource();
+        is.addEntry('0', 5);
+        is.addEntry('a', 5);
+        is.addEntry('b', 15);
+        is.addEntry('c', 20);
+        is.addEntry('d', 25);
+        is.addEntry('e', 30);
+        
+        RescaleArithmetic ra = new RescaleArithmetic(is);
+        
+        String plain = is.generateText().replace('0', 'a') + "0";
+        plain = plain.replace(' ', 'c');
+        System.out.println(plain);
+        String coded = ra.encode(plain);
+        System.out.println(coded + " " +coded.length()+"\n\n");
+        String decoded = ra.decode(coded, '0');
+        
+        System.out.println(decoded + "  matching? " + (decoded.equals(plain)));
+    }
+}

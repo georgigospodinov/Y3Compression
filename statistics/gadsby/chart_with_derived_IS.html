@@ -1,0 +1,49 @@
+<html>
+    <head>
+        <title>chart_with_derived_IS</title>
+        <meta charset="utf-8" />
+        <link href="https://cdnjs.cloudflare.com/ajax/libs/c3/0.4.10/c3.min.css" rel="stylesheet" />
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/3.5.6/d3.min.js"></script>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/c3/0.4.10/c3.min.js"></script>
+    </head>
+    <body>
+        <div id="chart"></div>
+        <script>
+            var chart = c3.generate({
+                data: {
+                    x: 'x',
+                    columns: [
+                        ['x',3414016,],
+                        ['Huffman Length',890125,],
+                        ['Arithmetic Time',81122.016,],
+                        ['Arithmetic Length',880744,],
+                        ['Entropy',880677,],
+                        ['Huffman Time',8.514,],
+                    ],
+                    axes: {
+                        "Huffman Length": "y",
+                        "Huffman Time": "y2",
+                        "Arithmetic Length": "y",
+                        "Arithmetic Time": "y2",
+                        "Entropy": "y",
+                    }
+                },
+                axis: {
+                    x: {
+                        label: "Message Length (bits)",
+                    },
+                    y: {
+                        label: "Coded Text Length (bits)",
+                    },
+                    y2: {
+                        show: true,
+                        label: "Coding Time (ms)",
+                    }
+                },
+                zoom: {
+                    enabled: true
+                },
+            });
+        </script>
+</body>
+</html>
